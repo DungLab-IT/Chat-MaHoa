@@ -1,0 +1,13 @@
+{
+  "name": "lan-secure-messenger-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local zero-knowledge WebSocket relay for LAN Secure Messenger",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
