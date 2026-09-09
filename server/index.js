@@ -1,10 +1,13 @@
 const http = require('http');
-const fs = require('fs');
 const path = require('path');
+const compression = require('compression');
+const express = require('express');
 const { WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT || 48485);
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const WEB_DIR = path.join(PUBLIC_DIR, 'web');
+const DOWNLOADS_DIR = path.join(PUBLIC_DIR, 'downloads');
 const clients = new Map();
 const offlineQueue = new Map();
 
@@ -15,42 +18,24 @@ const allowedOrigins = new Set(
     .filter(Boolean),
 );
 
-const httpServer = http.createServer((request, response) => {
-  const requestPath = decodeURIComponent((request.url || '/').split('?')[0]);
-  const relativePath = requestPath === '/'
-    ? 'index.html'
-    : requestPath.endsWith('/')
-      ? `${requestPath.replace(/^\/+|\/+$/g, '')}/index.html`
-      : requestPath.replace(/^\/+/, '');
-  const filePath = path.resolve(PUBLIC_DIR, relativePath);
+const app = express();
+app.use(compression());
 
-  if (!filePath.startsWith(`${PUBLIC_DIR}${path.sep}`)) {
-    response.writeHead(403);
-    response.end('Forbidden');
-    return;
-  }
+const staticOptions = {
+  maxAge: '7d',
+  setHeaders: (response) => {
+    response.setHeader('Cache-Control', 'public, max-age=604800');
+  },
+};
 
-  fs.stat(filePath, (error, fileInfo) => {
-    if (error || !fileInfo.isFile()) {
-      response.writeHead(404);
-      response.end('Not found');
-      return;
-    }
-
-    const contentTypes = {
-      '.css': 'text/css; charset=utf-8',
-      '.html': 'text/html; charset=utf-8',
-      '.js': 'text/javascript; charset=utf-8',
-      '.json': 'application/json; charset=utf-8',
-      '.svg': 'image/svg+xml',
-    };
-    response.writeHead(200, {
-      'Cache-Control': requestPath === '/' ? 'no-cache' : 'public, max-age=3600',
-      'Content-Type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
-    });
-    fs.createReadStream(filePath).pipe(response);
-  });
+app.get('/', (request, response) => {
+  response.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
+app.use('/web', express.static(WEB_DIR, staticOptions));
+app.use('/downloads', express.static(DOWNLOADS_DIR, staticOptions));
+app.use('/styles.css', express.static(path.join(PUBLIC_DIR, 'styles.css'), staticOptions));
+
+const httpServer = http.createServer(app);
 
 const server = new WebSocketServer({
   server: httpServer,
