@@ -145,6 +145,9 @@ class ChatService {
 
   Future<void> sendContactInvite({required String contactId, required String displayName, required String publicKey}) async {
     _ensureReady();
+    if (contactId.trim().isEmpty || publicKey.trim().isEmpty || contactId == _myClientId) {
+      throw const FormatException('Thông tin người nhận lời mời không hợp lệ');
+    }
     final request = ContactRequestModel(id: _requestId(), senderId: _myClientId, receiverId: contactId, displayName: _myProfile!['display_name'] as String, publicKey: _myProfile!['public_key'] as String, status: 'pending', createdAt: DateTime.now().toUtc());
     final features = _features;
     await features.saveContactRequest(request);
@@ -185,15 +188,26 @@ class ChatService {
     final data = Map<String, dynamic>.from(payload);
     if (event == 'CONTACT_INVITE') {
       final request = ContactRequestModel.fromMap(data);
+      if (request.senderId != from || request.receiverId != _myClientId || request.senderId == _myClientId) return;
       await _features.saveContactRequest(request);
       _requestController.add(request);
     } else if (event == 'CONTACT_ACCEPT') {
-      await database.saveContact(ContactModel(id: data['id'] as String, displayName: data['name'] as String, publicKey: data['pk'] as String));
+      final acceptedId = data['id'];
+      final acceptedName = data['name'];
+      final acceptedKey = data['pk'];
+      if (acceptedId != from || acceptedId == _myClientId || acceptedName is! String || acceptedKey is! String) return;
+      await database.saveContact(ContactModel(id: acceptedId as String, displayName: acceptedName, publicKey: acceptedKey));
       final requestId = data['request_id'] as String?;
       if (requestId != null) await _features.updateContactRequestStatus(requestId, 'accepted');
+      final request = requestId == null ? null : await _features.getContactRequest(requestId);
+      if (request != null) _requestController.add(request);
     } else if (event == 'CONTACT_DECLINE') {
       final requestId = data['request_id'] as String?;
-      if (requestId != null) await _features.updateContactRequestStatus(requestId, 'declined');
+      if (requestId != null) {
+        await _features.updateContactRequestStatus(requestId, 'declined');
+        final request = await _features.getContactRequest(requestId);
+        if (request != null) _requestController.add(request);
+      }
     } else if (event == 'MESSAGE_RECALL') {
       final messageId = data['message_id'] as String?;
       if (messageId != null) {
