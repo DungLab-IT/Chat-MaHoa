@@ -19,13 +19,14 @@ h1 em { color: #6a9b3b; font-style: normal; }
 .primary-button span { color: var(--mint); font-size: 1.3rem; }
 .downloads { border-top: 1px solid var(--line); padding: 70px 0 44px; }
 h2 { font-size: 2.6rem; }
-.download-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 32px; }
+.download-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 32px; }
 .download-card { display: flex; align-items: center; gap: 14px; min-height: 112px; border: 1px solid var(--line); border-radius: 5px; padding: 20px; color: var(--ink); text-decoration: none; background: rgba(255,255,255,.35); transition: transform .2s, border-color .2s, background .2s; }
 .download-card:hover { transform: translateY(-4px); border-color: var(--ink); background: white; }
 .platform-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; color: white; font-size: 1.35rem; }
-.windows { background: #287bd2; } .android { background: #64a83e; } .macos { background: #1d2926; }
+.windows { background: #287bd2; } .android { background: #64a83e; } .macos { background: #1d2926; } .web { background: var(--orange); }
 .card-copy { display: grid; gap: 5px; flex: 1; } .card-copy strong { font-family: 'Space Grotesk', sans-serif; font-size: 1.05rem; } .card-copy small { color: var(--muted); font-size: .78rem; }
 .download-arrow { color: var(--orange); font-size: 1.3rem; } .release-note { color: var(--muted); font-size: .8rem; margin-top: 18px; }
 .footer { display: flex; gap: 9px; align-items: center; border-top: 1px solid var(--line); padding: 22px 0 34px; color: var(--muted); font-size: .78rem; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #73b843; }
+@media (max-width: 900px) { .download-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 720px) { .shell { width: min(100% - 32px, 540px); } .hero { padding: 68px 0 80px; } h1 { font-size: 3.7rem; } .download-grid { grid-template-columns: 1fr; } .footer { align-items: flex-start; flex-wrap: wrap; } }
