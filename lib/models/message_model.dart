@@ -6,6 +6,7 @@ class MessageModel {
     required this.content,
     required this.timestamp,
     required this.status,
+    this.isRecalled = false,
   });
 
   final String id;
@@ -14,6 +15,7 @@ class MessageModel {
   final String content;
   final DateTime timestamp;
   final String status;
+  final bool isRecalled;
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -22,6 +24,7 @@ class MessageModel {
         'content': content,
         'timestamp': timestamp.millisecondsSinceEpoch,
         'status': status,
+        'is_recalled': isRecalled ? 1 : 0,
       };
 
   factory MessageModel.fromMap(Map<String, dynamic> map) {
@@ -36,6 +39,7 @@ class MessageModel {
       content: map['content'] as String,
       timestamp: timestamp,
       status: map['status'] as String,
+      isRecalled: map['is_recalled'] == 1 || map['is_recalled'] == true,
     );
   }
 }

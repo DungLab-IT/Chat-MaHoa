@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../models/contact_model.dart';
+import '../../models/contact_request_model.dart';
 import '../../models/message_model.dart';
 import 'database_backend.dart';
 
@@ -27,9 +28,18 @@ class NativeDatabaseBackend implements DatabaseBackend {
     final databasePath = path.join(directory.path, 'lan_secure_messenger.db');
     _database = await openDatabase(
       databasePath,
-      version: 1,
+      version: 2,
       onCreate: (database, version) async {
         await _createTables(database);
+      },
+      onUpgrade: (database, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await database.execute('ALTER TABLE messages ADD COLUMN is_recalled INTEGER NOT NULL DEFAULT 0');
+          await database.execute('''CREATE TABLE contact_requests (
+            id TEXT PRIMARY KEY, sender_id TEXT NOT NULL, receiver_id TEXT NOT NULL,
+            display_name TEXT NOT NULL, public_key TEXT NOT NULL, status TEXT NOT NULL,
+            created_at INTEGER NOT NULL)''');
+        }
       },
     );
   }
@@ -59,9 +69,14 @@ class NativeDatabaseBackend implements DatabaseBackend {
         receiver_id TEXT NOT NULL,
         content TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
-        status TEXT CHECK(status IN ('pending', 'sent', 'delivered', 'read'))
+        status TEXT CHECK(status IN ('pending', 'sent', 'delivered', 'read')),
+        is_recalled INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    await database.execute('''CREATE TABLE contact_requests (
+      id TEXT PRIMARY KEY, sender_id TEXT NOT NULL, receiver_id TEXT NOT NULL,
+      display_name TEXT NOT NULL, public_key TEXT NOT NULL, status TEXT NOT NULL,
+      created_at INTEGER NOT NULL)''');
     await database.execute('''
       CREATE TABLE my_profile (
         id TEXT PRIMARY KEY,
@@ -102,6 +117,30 @@ class NativeDatabaseBackend implements DatabaseBackend {
   }
 
   @override
+  Future<void> saveContactRequest(ContactRequestModel request) async => database.insert('contact_requests', request.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+
+  @override
+  Future<List<ContactRequestModel>> getPendingContactRequests() async {
+    final rows = await database.query('contact_requests', where: 'status = ?', whereArgs: ['pending'], orderBy: 'created_at DESC');
+    return rows.map(ContactRequestModel.fromMap).toList();
+  }
+
+  @override
+  Future<ContactRequestModel?> getContactRequest(String requestId) async {
+    final rows = await database.query('contact_requests', where: 'id = ?', whereArgs: [requestId], limit: 1);
+    return rows.isEmpty ? null : ContactRequestModel.fromMap(rows.first);
+  }
+
+  @override
+  Future<void> updateContactRequestStatus(String requestId, String status) async => database.update('contact_requests', {'status': status}, where: 'id = ?', whereArgs: [requestId]);
+
+  @override
+  Future<void> deleteContact(String contactId) async {
+    await database.delete('contacts', where: 'id = ?', whereArgs: [contactId]);
+    await deleteMessagesByContactId(contactId);
+  }
+
+  @override
   Future<void> updateContactStatus(
     String contactId, {
     required bool isOnline,
@@ -121,6 +160,12 @@ class NativeDatabaseBackend implements DatabaseBackend {
   }
 
   @override
+  Future<MessageModel?> getMessage(String messageId) async {
+    final rows = await database.query('messages', where: 'id = ?', whereArgs: [messageId], limit: 1);
+    return rows.isEmpty ? null : MessageModel.fromMap(rows.first);
+  }
+
+  @override
   Future<List<MessageModel>> getMessagesByContactId(String contactId) async {
     final rows = await database.query(
       'messages',
@@ -130,6 +175,15 @@ class NativeDatabaseBackend implements DatabaseBackend {
     );
     return rows.map(MessageModel.fromMap).toList();
   }
+
+  @override
+  Future<void> deleteMessagesByContactId(String contactId) async => database.delete('messages', where: 'sender_id = ? OR receiver_id = ?', whereArgs: [contactId, contactId]);
+
+  @override
+  Future<void> deleteMessage(String messageId) async => database.delete('messages', where: 'id = ?', whereArgs: [messageId]);
+
+  @override
+  Future<void> markMessageRecalled(String messageId) async => database.update('messages', {'is_recalled': 1}, where: 'id = ?', whereArgs: [messageId]);
 }
 
 DatabaseBackend createDatabaseBackend() => NativeDatabaseBackend();

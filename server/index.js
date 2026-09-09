@@ -111,6 +111,25 @@ function forwardMessage(socket, message) {
   sendJson(socket, { type: 'QUEUED', to });
 }
 
+function forwardPeerEvent(socket, message) {
+  const { to, from, event, payload } = message;
+  if (socket.clientId !== from) {
+    sendError(socket, 'Sender is not registered or does not match the from field');
+    return;
+  }
+  if (typeof to !== 'string' || typeof event !== 'string' || typeof payload !== 'object' || payload === null) {
+    sendError(socket, 'PEER_EVENT requires to, event and payload');
+    return;
+  }
+  const forwardedEvent = { type: 'PEER_EVENT', to, from, event, payload };
+  const recipient = clients.get(to);
+  if (recipient && sendJson(recipient, forwardedEvent)) return;
+  const queue = offlineQueue.get(to) || [];
+  queue.push(forwardedEvent);
+  offlineQueue.set(to, queue);
+  sendJson(socket, { type: 'QUEUED', to });
+}
+
 server.on('connection', (socket) => {
   socket.clientId = null;
   console.log('[CONNECT] client connected');
@@ -144,6 +163,15 @@ server.on('connection', (socket) => {
         return;
       }
       forwardMessage(socket, message);
+      return;
+    }
+
+    if (message.type === 'PEER_EVENT') {
+      if (!socket.clientId) {
+        sendError(socket, 'Register before sending peer events');
+        return;
+      }
+      forwardPeerEvent(socket, message);
       return;
     }
 

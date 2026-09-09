@@ -50,6 +50,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _loadMessages() async { final messages = await widget.database.getMessagesByContactId(widget.contact.id); if (mounted) { setState(() => _messages = messages); _scrollToBottom(); } }
+
+  Future<void> _deleteChat() async {
+    await widget.database.deleteMessagesByContactId(widget.contact.id);
+    if (mounted) { setState(() => _messages = []); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã xóa cuộc trò chuyện trên thiết bị này'))); }
+  }
+
+  Future<void> _deleteMessage(MessageModel message) async { await widget.database.deleteMessage(message.id); await _loadMessages(); }
+  Future<void> _recallMessage(MessageModel message) async { await widget.chatService.recallMessage(message); await _loadMessages(); }
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -75,8 +83,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Row(children: [CircleAvatar(radius: 17, child: Text(widget.contact.displayName[0].toUpperCase())), const SizedBox(width: 10), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(widget.contact.displayName, style: const TextStyle(fontSize: 16)), Row(children: [const Text('E2EE Secured', style: TextStyle(fontSize: 11, color: Color(0xff59d6c5))), const SizedBox(width: 7), Icon(Icons.circle, size: 8, color: _status == ConnectionStatus.connected ? const Color(0xff58d69c) : _status == ConnectionStatus.reconnecting ? Colors.amber : Colors.redAccent)])]),] ),),
-        body: Column(children: [if (_status != ConnectionStatus.connected) _ReconnectBanner(status: _status, onReconnect: widget.client.reconnect), Expanded(child: _messages.isEmpty ? const Center(child: Text('Tin nhắn được mã hóa đầu cuối')) : ListView.builder(controller: _scrollController, padding: const EdgeInsets.all(16), itemCount: _messages.length, itemBuilder: (_, index) { final message = _messages[index]; return _Bubble(message: message, mine: message.senderId == widget.myClientId); })), _Composer(controller: _inputController, sending: _sending, enabled: _status == ConnectionStatus.connected, onSend: _send)]),
+        appBar: AppBar(title: Row(children: [CircleAvatar(radius: 17, child: Text(widget.contact.displayName[0].toUpperCase())), const SizedBox(width: 10), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(widget.contact.displayName, style: const TextStyle(fontSize: 16)), Row(children: [const Text('E2EE Secured', style: TextStyle(fontSize: 11, color: Color(0xff59d6c5))), const SizedBox(width: 7), Icon(Icons.circle, size: 8, color: _status == ConnectionStatus.connected ? const Color(0xff58d69c) : _status == ConnectionStatus.reconnecting ? Colors.amber : Colors.redAccent)])]),],), actions: [PopupMenuButton<String>(onSelected: (value) { if (value == 'clear') _deleteChat(); }, itemBuilder: (_) => const [PopupMenuItem(value: 'clear', child: Text('Xóa cuộc trò chuyện'))])]),
+        body: Column(children: [if (_status != ConnectionStatus.connected) _ReconnectBanner(status: _status, onReconnect: widget.client.reconnect), Expanded(child: _messages.isEmpty ? const Center(child: Text('Tin nhắn được mã hóa đầu cuối')) : ListView.builder(controller: _scrollController, padding: const EdgeInsets.all(16), itemCount: _messages.length, itemBuilder: (_, index) { final message = _messages[index]; return _Bubble(message: message, mine: message.senderId == widget.myClientId, onDelete: () => _deleteMessage(message), onRecall: message.senderId == widget.myClientId && !message.isRecalled ? () => _recallMessage(message) : null); })), _Composer(controller: _inputController, sending: _sending, enabled: _status == ConnectionStatus.connected, onSend: _send)]),
       );
 }
 
@@ -89,16 +97,20 @@ class _ReconnectBanner extends StatelessWidget {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, required this.mine});
+  const _Bubble({required this.message, required this.mine, required this.onDelete, this.onRecall});
   final MessageModel message;
   final bool mine;
+  final VoidCallback onDelete;
+  final VoidCallback? onRecall;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
           final maxBubbleWidth = constraints.maxWidth * .7;
           return Align(
             alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(
+            child: GestureDetector(
+              onLongPress: () => showModalBottomSheet<void>(context: context, builder: (_) => SafeArea(child: Wrap(children: [if (onRecall != null) ListTile(leading: const Icon(Icons.undo), title: const Text('Thu hồi tin nhắn'), onTap: () { Navigator.pop(context); onRecall!(); }), ListTile(leading: const Icon(Icons.delete_outline), title: const Text('Xóa trên thiết bị này'), onTap: () { Navigator.pop(context); onDelete(); })]))),
+              child: Container(
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               constraints: BoxConstraints(maxWidth: maxBubbleWidth),
@@ -114,13 +126,14 @@ class _Bubble extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Align(alignment: Alignment.centerLeft, child: Text(message.content)),
+                  Align(alignment: Alignment.centerLeft, child: Text(message.isRecalled ? 'Tin nhắn đã được thu hồi' : message.content, style: message.isRecalled ? const TextStyle(fontStyle: FontStyle.italic, color: Colors.white60) : null)),
                   const SizedBox(height: 4),
                   Text(
                     '${message.timestamp.hour.toString().padLeft(2, '0')}:${message.timestamp.minute.toString().padLeft(2, '0')}',
                     style: const TextStyle(fontSize: 10, color: Colors.white60),
                   ),
                 ],
+              ),
               ),
             ),
           );

@@ -6,6 +6,7 @@ import '../../core/database/database_helper.dart';
 import '../../core/network/websocket_client.dart';
 import '../../core/services/chat_service.dart';
 import '../../models/contact_model.dart';
+import '../../models/contact_request_model.dart';
 import '../../models/message_model.dart';
 import 'chat_room_screen.dart';
 import 'qr_contact_screen.dart';
@@ -25,7 +26,9 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> {
   List<ContactModel> _contacts = [];
+  List<ContactRequestModel> _requests = [];
   StreamSubscription<MessageModel>? _messageSubscription;
+  StreamSubscription<ContactRequestModel>? _requestSubscription;
   StreamSubscription<ConnectionStatus>? _statusSubscription;
   ConnectionStatus _status = ConnectionStatus.disconnected;
   final Map<String, MessageModel?> _latest = {};
@@ -35,28 +38,39 @@ class _ChatListScreenState extends State<ChatListScreen> {
     super.initState();
     _loadContacts();
     _messageSubscription = widget.chatService.messageStream.listen((_) => _loadContacts());
+    _requestSubscription = widget.chatService.requestStream.listen((_) => _loadContacts());
     _statusSubscription = widget.client.connectionStatus.listen((status) { if (mounted) setState(() => _status = status); });
   }
 
   Future<void> _loadContacts() async {
     final contacts = await widget.database.getContacts();
+    final requests = await widget.database.getPendingContactRequests();
     for (final contact in contacts) {
       final messages = await widget.database.getMessagesByContactId(contact.id);
       _latest[contact.id] = messages.isEmpty ? null : messages.last;
     }
-    if (mounted) setState(() => _contacts = contacts);
+    if (mounted) setState(() { _contacts = contacts; _requests = requests; });
   }
 
   @override
   void dispose() {
     _messageSubscription?.cancel();
+    _requestSubscription?.cancel();
     _statusSubscription?.cancel();
     super.dispose();
   }
 
   Future<void> _openQr() async {
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => QrContactScreen(database: widget.database, profile: widget.profile)));
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => QrContactScreen(database: widget.database, profile: widget.profile, chatService: widget.chatService)));
     _loadContacts();
+  }
+
+  Future<void> _acceptRequest(ContactRequestModel request) async { await widget.chatService.acceptContactRequest(request); await _loadContacts(); }
+  Future<void> _declineRequest(ContactRequestModel request) async { await widget.chatService.declineContactRequest(request); await _loadContacts(); }
+
+  Future<void> _deleteContact(ContactModel contact) async {
+    final shouldDelete = await showDialog<bool>(context: context, builder: (_) => AlertDialog(title: const Text('Xóa liên hệ?'), content: Text('Xóa ${contact.displayName} và toàn bộ đoạn chat trên thiết bị này?'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Xóa'))]));
+    if (shouldDelete == true) { await widget.database.deleteContact(contact.id); await _loadContacts(); }
   }
 
   @override
@@ -75,6 +89,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
             children: [
               _ConnectionBanner(status: _status),
               const SizedBox(height: 20),
+              if (_requests.isNotEmpty) _RequestsCard(requests: _requests, onAccept: _acceptRequest, onDecline: _declineRequest),
+              if (_requests.isNotEmpty) const SizedBox(height: 12),
               if (_contacts.isEmpty) const _EmptyChats() else ..._contacts.map(_contactTile),
             ],
           ),
@@ -93,6 +109,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         subtitle: Text(latest?.content ?? 'Bắt đầu cuộc trò chuyện bảo mật', maxLines: 1, overflow: TextOverflow.ellipsis),
         trailing: latest == null ? null : Text(_time(latest.timestamp), style: Theme.of(context).textTheme.labelSmall),
         onTap: () async { await Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(contact: contact, database: widget.database, chatService: widget.chatService, client: widget.client, myClientId: widget.profile['id'] as String))); _loadContacts(); },
+        onLongPress: () => _deleteContact(contact),
       ),
     );
   }
@@ -119,6 +136,34 @@ class _ConnectionBanner extends StatelessWidget {
       ]),
     );
   }
+}
+
+class _RequestsCard extends StatelessWidget {
+  const _RequestsCard({required this.requests, required this.onAccept, required this.onDecline});
+  final List<ContactRequestModel> requests;
+  final Future<void> Function(ContactRequestModel) onAccept;
+  final Future<void> Function(ContactRequestModel) onDecline;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Lời mời kết bạn', style: TextStyle(fontWeight: FontWeight.w700)),
+            ...requests.map((request) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.person_add_alt_1),
+                  title: Text(request.displayName),
+                  subtitle: Text('ID: ${request.senderId}\nKhóa công khai: ${request.publicKey.substring(0, request.publicKey.length.clamp(0, 18))}...'),
+                  isThreeLine: true,
+                  trailing: Wrap(children: [
+                    IconButton(tooltip: 'Chấp nhận', onPressed: () => onAccept(request), icon: const Icon(Icons.check, color: Colors.green)),
+                    IconButton(tooltip: 'Từ chối', onPressed: () => onDecline(request), icon: const Icon(Icons.close, color: Colors.redAccent)),
+                  ]),
+                )),
+          ]),
+        ),
+      );
 }
 
 class _EmptyChats extends StatelessWidget {

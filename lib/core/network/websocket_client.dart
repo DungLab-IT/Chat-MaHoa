@@ -8,7 +8,7 @@ import '../services/chat_contracts.dart';
 
 enum ConnectionStatus { connected, reconnecting, disconnected }
 
-class WebSocketClient implements ChatTransport {
+class WebSocketClient implements ChatTransport, PeerEventTransport {
   WebSocketChannel? _channel;
   Timer? _reconnectTimer;
   String? _serverUrl;
@@ -134,6 +134,14 @@ class WebSocketClient implements ChatTransport {
       'from': clientId,
       'payload': payload,
     }));
+  }
+
+  @override
+  void sendPeerEvent({required String toClientId, required String event, required Map<String, dynamic> payload}) {
+    final clientId = _clientId;
+    final channel = _channel;
+    if (clientId == null || channel == null) return;
+    channel.sink.add(jsonEncode({'type': 'PEER_EVENT', 'to': toClientId, 'from': clientId, 'event': event, 'payload': payload}));
   }
 
   Future<void> disconnect() async {
