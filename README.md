@@ -2,6 +2,24 @@
 
 Ứng dụng nhắn tin E2EE trong mạng LAN, chạy trên Android, iOS, macOS, Windows và Web. Local Relay Server chỉ định tuyến payload WebSocket; việc mã hóa và giải mã diễn ra ở hai client.
 
+## Cổng tải ứng dụng
+
+Relay server đồng thời phục vụ portal tải ứng dụng tại `http://<server>:48485/`. Các nút tải dùng đúng ba tên file sau trong `server/public/downloads/`:
+
+```text
+lan-secure-messenger-windows.exe
+lan-secure-messenger-android.apk
+lan-secure-messenger-macos.dmg
+```
+
+Build bản Web và chép vào đường dẫn `/web/` bằng script:
+
+```bash
+./scripts/prepare_portal.sh
+```
+
+Binary nên phát hành qua GitHub Releases rồi chép về `server/public/downloads/`; không đưa file cài đặt lớn vào commit mã nguồn.
+
 ## Giai đoạn 7: Vận hành và kiểm thử thực tế
 
 ### 1. Chuẩn bị môi trường trên Mac
@@ -33,10 +51,10 @@ npm install
 npm start
 ```
 
-Server mặc định lắng nghe trên mọi interface tại cổng `48485`:
+Server mặc định lắng nghe trên mọi interface tại cổng `48485`, phục vụ cả portal HTTP và relay WebSocket:
 
 ```text
-LAN Secure Messenger relay listening on ws://0.0.0.0:48485
+LAN Secure Messenger portal and relay listening on port 48485
 ```
 
 Giữ cửa sổ terminal này mở trong suốt quá trình kiểm thử. Dừng server bằng `Ctrl+C`.

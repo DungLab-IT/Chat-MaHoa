@@ -1,6 +1,10 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT || 48485);
+const PUBLIC_DIR = path.join(__dirname, 'public');
 const clients = new Map();
 const offlineQueue = new Map();
 
@@ -11,9 +15,45 @@ const allowedOrigins = new Set(
     .filter(Boolean),
 );
 
+const httpServer = http.createServer((request, response) => {
+  const requestPath = decodeURIComponent((request.url || '/').split('?')[0]);
+  const relativePath = requestPath === '/'
+    ? 'index.html'
+    : requestPath.endsWith('/')
+      ? `${requestPath.replace(/^\/+|\/+$/g, '')}/index.html`
+      : requestPath.replace(/^\/+/, '');
+  const filePath = path.resolve(PUBLIC_DIR, relativePath);
+
+  if (!filePath.startsWith(`${PUBLIC_DIR}${path.sep}`)) {
+    response.writeHead(403);
+    response.end('Forbidden');
+    return;
+  }
+
+  fs.stat(filePath, (error, fileInfo) => {
+    if (error || !fileInfo.isFile()) {
+      response.writeHead(404);
+      response.end('Not found');
+      return;
+    }
+
+    const contentTypes = {
+      '.css': 'text/css; charset=utf-8',
+      '.html': 'text/html; charset=utf-8',
+      '.js': 'text/javascript; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+      '.svg': 'image/svg+xml',
+    };
+    response.writeHead(200, {
+      'Cache-Control': requestPath === '/' ? 'no-cache' : 'public, max-age=3600',
+      'Content-Type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+    });
+    fs.createReadStream(filePath).pipe(response);
+  });
+});
+
 const server = new WebSocketServer({
-  host: '0.0.0.0',
-  port: PORT,
+  server: httpServer,
   verifyClient: ({ origin }) => {
     if (!origin || allowedOrigins.has('*')) return true;
     return [...allowedOrigins].some((allowed) => origin === allowed || origin.startsWith(`${allowed}:`));
@@ -139,10 +179,10 @@ server.on('connection', (socket) => {
   });
 });
 
-server.on('listening', () => {
-  console.log(`LAN Secure Messenger relay listening on ws://0.0.0.0:${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`LAN Secure Messenger portal and relay listening on port ${PORT}`);
 });
 
-server.on('error', (error) => {
+httpServer.on('error', (error) => {
   console.error(`[SERVER_ERROR] ${error.message}`);
 });

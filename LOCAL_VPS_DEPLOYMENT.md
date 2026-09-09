@@ -24,7 +24,29 @@ Cần có Flutter stable, Node.js/npm và Chrome. Android Studio/Xcode chỉ c�
 - Firewall có thể mở TCP port `48485`.
 - GitHub repository đã được tạo.
 
-## 2. Test toàn bộ project trên Mac
+## 2. Chuẩn bị portal tải ứng dụng
+
+Build Flutter Web và đưa bản build vào portal:
+
+```bash
+cd /Volumes/KIOXIA_G2/Projects/ATBM
+chmod +x scripts/prepare_portal.sh
+./scripts/prepare_portal.sh
+```
+
+Đặt ba file phát hành vào `server/public/downloads/` với đúng tên:
+
+```text
+lan-secure-messenger-windows.exe
+lan-secure-messenger-android.apk
+lan-secure-messenger-macos.dmg
+```
+
+Có thể tải các file này từ GitHub Releases khi deploy. File `.exe` cần build trên Windows; `.apk` có thể build bằng `flutter build apk --release`; `.dmg` có thể tạo trên macOS sau khi build macOS. Không commit binary lớn vào repository.
+
+Portal sẽ mở ở `http://<VPS_IP>:48485/`, còn bản Web ở `http://<VPS_IP>:48485/web/`.
+
+## 3. Test toàn bộ project trên Mac
 
 Từ thư mục project:
 
@@ -38,7 +60,7 @@ flutter build web --no-tree-shake-icons
 
 Các lệnh trên kiểm tra dependencies, analyzer, crypto/database/chat pipeline và build Web.
 
-## 3. Chạy Relay Server local
+## 4. Chạy Relay Server local
 
 Mở terminal riêng:
 
@@ -93,7 +115,7 @@ ws://<IP_MAC>:48485
 
 Ví dụ `ws://192.168.1.42:48485`.
 
-## 4. Chạy nhiều client local
+## 5. Chạy nhiều client local
 
 Mỗi lệnh nên chạy trong một terminal riêng.
 
@@ -123,7 +145,7 @@ Android Emulator thường dùng `ws://10.0.2.2:48485` để trỏ về Mac host
 
 Sau khi unlock Master PIN, client tự kết nối relay. Nếu relay chưa chạy, UI hiển thị `Reconnecting` và tự thử lại mỗi 3 giây.
 
-## 5. Kiểm thử kết bạn và E2EE
+## 6. Kiểm thử kết bạn và E2EE
 
 1. Chạy relay.
 2. Mở Client 1 và Client 2.
@@ -135,7 +157,7 @@ Sau khi unlock Master PIN, client tự kết nối relay. Nếu relay chưa ch�
 8. Xác nhận Client 1 lưu trạng thái `sent`, Client 2 giải mã và hiển thị trạng thái `delivered`.
 9. Kiểm tra relay chỉ log sender/receiver, kích thước và tên field `iv,ciphertext,tag`, không log plaintext.
 
-## 6. Đẩy project lên GitHub
+## 7. Đẩy project lên GitHub
 
 Tại thư mục root:
 
@@ -174,7 +196,7 @@ git status --short
 git diff --cached --check
 ```
 
-## 7. Cài Relay từ GitHub lên VPS
+## 8. Cài Portal và Relay từ GitHub lên VPS
 
 SSH vào VPS:
 
@@ -204,9 +226,17 @@ npm ci --omit=dev
 node --check index.js
 ```
 
+Sau đó chép bản Web vào `server/public/web/` và ba file cài đặt vào `server/public/downloads/` theo tên ở mục 2. Kiểm tra portal trước khi chạy nền:
+
+```bash
+cd /opt/lan-secure-messenger/server
+npm start
+curl -I http://127.0.0.1:48485/
+```
+
 Nếu repository private, VPS cần SSH deploy key hoặc GitHub token phù hợp. Không ghi token trực tiếp vào shell history.
 
-## 8. Mở firewall VPS
+## 9. Mở firewall VPS
 
 Với UFW:
 
@@ -225,7 +255,7 @@ Kiểm tra relay chỉ bind đúng port:
 sudo ss -lntp | grep 48485
 ```
 
-## 9. Chạy relay bền vững bằng PM2
+## 10. Chạy portal và relay bền vững bằng PM2
 
 Cài PM2:
 
@@ -262,7 +292,7 @@ pm2 restart lan-secure-relay
 pm2 logs lan-secure-relay --lines 50
 ```
 
-## 10. Trỏ Flutter Client tới VPS
+## 11. Trỏ Flutter Client tới VPS
 
 Trong màn hình cấu hình server của app, nhập:
 
@@ -278,7 +308,7 @@ wss://relay.example.com
 
 URL cuối cùng được lưu cục bộ và app sẽ tự dùng lại ở lần mở sau.
 
-## 11. Khuyến nghị production
+## 12. Khuyến nghị production
 
 Cổng WebSocket raw `ws://` phù hợp cho test LAN hoặc mạng tin cậy. Khi đưa relay lên VPS Internet:
 
