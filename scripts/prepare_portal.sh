@@ -6,7 +6,7 @@ portal_dir="$project_root/server/public"
 
 cd "$project_root"
 flutter pub get
-flutter build web --release --no-tree-shake-icons
+flutter build web --release --base-href /web/ --no-tree-shake-icons
 rm -rf "$portal_dir/web"
 cp -R build/web "$portal_dir/web"
 

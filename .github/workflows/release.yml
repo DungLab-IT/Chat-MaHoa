@@ -59,7 +59,7 @@ jobs:
         if: matrix.target == 'android-web'
         run: |
           flutter build apk --release
-          flutter build web --release --no-tree-shake-icons
+          flutter build web --release --base-href /web/ --no-tree-shake-icons
           cp build/app/outputs/flutter-apk/app-release.apk lan-secure-messenger-android.apk
           cd build/web && zip -r ../../lan-secure-messenger-web.zip .
 
