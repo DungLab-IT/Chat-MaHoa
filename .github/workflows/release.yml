@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -39,8 +40,12 @@ jobs:
         if: matrix.target == 'windows'
         shell: pwsh
         run: |
-          Copy-Item build/windows/runner/Release/lan_secure_messenger.exe lan-secure-messenger-windows.exe
-          Compress-Archive -Path build/windows/runner/Release/* -DestinationPath lan-secure-messenger-windows.zip
+          $releaseDir = Get-ChildItem -Path build/windows -Directory -Recurse |
+            Where-Object { Test-Path (Join-Path $_.FullName 'lan_secure_messenger.exe') } |
+            Select-Object -First 1
+          if (-not $releaseDir) { throw 'Flutter Windows release directory was not found' }
+          Copy-Item (Join-Path $releaseDir.FullName 'lan_secure_messenger.exe') lan-secure-messenger-windows.exe
+          Compress-Archive -Path (Join-Path $releaseDir.FullName '*') -DestinationPath lan-secure-messenger-windows.zip
 
       - name: Build macOS
         if: matrix.target == 'macos'
