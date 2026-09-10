@@ -28,6 +28,8 @@ class ChatService {
       StreamController<MessageModel>.broadcast();
     final StreamController<ContactRequestModel> _requestController =
       StreamController<ContactRequestModel>.broadcast();
+      final StreamController<String> _chatDeletedController =
+        StreamController<String>.broadcast();
   late final StreamSubscription<Map<String, dynamic>> _messageSubscription;
 
   Map<String, dynamic>? _myProfile;
@@ -37,6 +39,7 @@ class ChatService {
 
   Stream<MessageModel> get messageStream => _messageController.stream;
   Stream<ContactRequestModel> get requestStream => _requestController.stream;
+  Stream<String> get chatDeletedStream => _chatDeletedController.stream;
   Map<String, dynamic>? get myProfile => _myProfile == null
       ? null
       : Map<String, dynamic>.unmodifiable(_myProfile!);
@@ -83,6 +86,9 @@ class ChatService {
   }) async {
     _ensureReady();
     final contact = await _findContact(receiverContactId);
+    if (contact.status != ContactStatus.accepted) {
+      throw StateError('Contact request must be accepted before messaging');
+    }
     final sessionKey = await _sessionKeyFor(contact);
     final messageId = _messageId();
     final encrypted = await _crypto.encryptMessage(plainTextContent, sessionKey);
@@ -110,6 +116,23 @@ class ChatService {
 
   Future<void> onMessageReceived(Map<String, dynamic> message) async {
     if (_disposed) return;
+    final type = message['type'];
+    if (type == 'FRIEND_REQUEST_RECEIVED') {
+      await _handleFriendRequest(message);
+      return;
+    }
+    if (type == 'FRIEND_RESPONDED') {
+      await _handleFriendResponse(message['fromUserId'] as String?, message['action'] as String?, message['fromUserName'] as String?, message['fromPublicKey'] as String?);
+      return;
+    }
+    if (type == 'REMOTE_CHAT_DELETED') {
+      final contactId = message['fromUserId'];
+      if (contactId is String) {
+        await _features.clearChat(contactId);
+        _chatDeletedController.add(contactId);
+      }
+      return;
+    }
     if (message['type'] == 'PEER_EVENT') {
       await _onPeerEvent(message);
       return;
@@ -145,26 +168,55 @@ class ChatService {
 
   Future<void> sendContactInvite({required String contactId, required String displayName, required String publicKey}) async {
     _ensureReady();
-    final request = ContactRequestModel(id: _requestId(), senderId: _myClientId, receiverId: contactId, displayName: _myProfile!['display_name'] as String, publicKey: _myProfile!['public_key'] as String, status: 'pending', createdAt: DateTime.now().toUtc());
+    final request = ContactRequestModel(id: _requestId(), senderId: _myClientId, receiverId: contactId, displayName: displayName, publicKey: publicKey, status: 'pendingSent', createdAt: DateTime.now().toUtc());
     final features = _features;
     await features.saveContactRequest(request);
-    _sendPeerEvent(contactId, 'CONTACT_INVITE', request.toMap());
+    await database.saveContact(ContactModel(id: contactId, displayName: displayName, publicKey: publicKey, status: ContactStatus.pendingSent));
+    final friendTransport = transport;
+    if (friendTransport is FriendRequestTransport) {
+      (friendTransport as FriendRequestTransport).sendFriendRequest(targetUserId: contactId, fromUserId: _myClientId, fromUserName: _myProfile!['display_name'] as String, fromPublicKey: _myProfile!['public_key'] as String);
+    } else {
+      _sendPeerEvent(contactId, 'CONTACT_INVITE', request.toMap());
+    }
   }
 
   Future<void> acceptContactRequest(ContactRequestModel request) async {
     _ensureReady();
     final features = _features;
-    await database.saveContact(ContactModel(id: request.senderId, displayName: request.displayName, publicKey: request.publicKey));
+    await database.saveContact(ContactModel(id: request.senderId, displayName: request.displayName, publicKey: request.publicKey, status: ContactStatus.accepted));
     await features.updateContactRequestStatus(request.id, 'accepted');
-    _sendPeerEvent(request.senderId, 'CONTACT_ACCEPT', {'request_id': request.id, 'id': _myClientId, 'name': _myProfile!['display_name'], 'pk': _myProfile!['public_key']});
+    final friendTransport = transport;
+    if (friendTransport is FriendRequestTransport) {
+      (friendTransport as FriendRequestTransport).sendFriendResponse(targetUserId: request.senderId, fromUserId: _myClientId, fromUserName: _myProfile!['display_name'] as String, fromPublicKey: _myProfile!['public_key'] as String, action: 'accepted');
+    } else {
+      _sendPeerEvent(request.senderId, 'CONTACT_ACCEPT', {'request_id': request.id, 'id': _myClientId, 'name': _myProfile!['display_name'], 'pk': _myProfile!['public_key']});
+    }
     _requestController.add(request);
   }
 
   Future<void> declineContactRequest(ContactRequestModel request) async {
     final features = _features;
     await features.updateContactRequestStatus(request.id, 'declined');
-    _sendPeerEvent(request.senderId, 'CONTACT_DECLINE', {'request_id': request.id});
+    final friendTransport = transport;
+    if (friendTransport is FriendRequestTransport) {
+      (friendTransport as FriendRequestTransport).sendFriendResponse(targetUserId: request.senderId, fromUserId: _myClientId, fromUserName: _myProfile!['display_name'] as String, fromPublicKey: _myProfile!['public_key'] as String, action: 'rejected');
+    } else {
+      _sendPeerEvent(request.senderId, 'CONTACT_DECLINE', {'request_id': request.id});
+    }
+    await _features.deleteContact(request.senderId);
     _requestController.add(request);
+  }
+
+  Future<void> deleteChat({required String contactId, required bool forBoth}) async {
+    _ensureReady();
+    await _features.clearChat(contactId);
+    if (forBoth) {
+      final syncTransport = transport;
+      if (syncTransport is ChatSyncTransport) {
+        (syncTransport as ChatSyncTransport).sendDeleteChatSync(targetUserId: contactId, chatId: contactId);
+      }
+    }
+    _chatDeletedController.add(contactId);
   }
 
   Future<void> recallMessage(MessageModel message) async {
@@ -188,20 +240,52 @@ class ChatService {
       await _features.saveContactRequest(request);
       _requestController.add(request);
     } else if (event == 'CONTACT_ACCEPT') {
-      await database.saveContact(ContactModel(id: data['id'] as String, displayName: data['name'] as String, publicKey: data['pk'] as String));
-      final requestId = data['request_id'] as String?;
-      if (requestId != null) await _features.updateContactRequestStatus(requestId, 'accepted');
+      await _handleFriendResponse(from, 'accepted', data['name'] as String?, data['pk'] as String?);
     } else if (event == 'CONTACT_DECLINE') {
-      final requestId = data['request_id'] as String?;
-      if (requestId != null) await _features.updateContactRequestStatus(requestId, 'declined');
+      await _handleFriendResponse(from, 'rejected', null, null);
     } else if (event == 'MESSAGE_RECALL') {
+      final requestId = data['request_id'] as String?;
       final messageId = data['message_id'] as String?;
+      if (requestId != null && messageId == null) await _features.updateContactRequestStatus(requestId, 'rejected');
       if (messageId != null) {
         await _features.markMessageRecalled(messageId);
         final recalled = await _features.getMessage(messageId);
         if (recalled != null) _messageController.add(recalled);
       }
     }
+  }
+
+  Future<void> _handleFriendRequest(Map<String, dynamic> message) async {
+    final senderId = message['fromUserId'];
+    final senderName = message['fromUserName'];
+    final publicKey = message['fromPublicKey'];
+    if (senderId is! String || senderName is! String || publicKey is! String) return;
+    final request = ContactRequestModel(
+      id: 'request-$senderId-${message['timestamp'] ?? DateTime.now().millisecondsSinceEpoch}',
+      senderId: senderId,
+      receiverId: _myClientId,
+      displayName: senderName,
+      publicKey: publicKey,
+      status: 'pendingReceived',
+      createdAt: DateTime.fromMillisecondsSinceEpoch((message['timestamp'] as int?) ?? DateTime.now().millisecondsSinceEpoch, isUtc: true),
+    );
+    await _features.saveContactRequest(request);
+    await database.saveContact(ContactModel(id: senderId, displayName: senderName, publicKey: publicKey, status: ContactStatus.pendingReceived));
+    _requestController.add(request);
+  }
+
+  Future<void> _handleFriendResponse(String? contactId, String? action, String? displayName, String? publicKey) async {
+    if (contactId == null || action == null) return;
+    final contacts = await database.getContacts();
+    final current = contacts.where((contact) => contact.id == contactId).firstOrNull;
+    if (current != null) {
+      await database.saveContact(ContactModel(id: contactId, displayName: displayName ?? current.displayName, publicKey: publicKey ?? current.publicKey, isOnline: current.isOnline, lastSeen: current.lastSeen, status: action == 'accepted' ? ContactStatus.accepted : ContactStatus.rejected));
+    }
+    final requests = await _features.getPendingContactRequests();
+    for (final request in requests.where((request) => request.receiverId == contactId)) {
+      await _features.updateContactRequestStatus(request.id, action == 'accepted' ? 'accepted' : 'rejected');
+    }
+    _requestController.add(ContactRequestModel(id: 'response-$contactId', senderId: contactId, receiverId: _myClientId, displayName: displayName ?? contactId, publicKey: publicKey ?? '', status: action, createdAt: DateTime.now().toUtc()));
   }
 
   Future<SecretKey> _sessionKeyFor(ContactModel contact) async {
@@ -267,5 +351,6 @@ class ChatService {
     _privateKey = null;
     await _messageController.close();
     await _requestController.close();
+    await _chatDeletedController.close();
   }
 }

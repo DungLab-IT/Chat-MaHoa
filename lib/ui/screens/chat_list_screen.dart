@@ -8,6 +8,7 @@ import '../../core/services/chat_service.dart';
 import '../../models/contact_model.dart';
 import '../../models/contact_request_model.dart';
 import '../../models/message_model.dart';
+import '../widgets/data_storage_setting_tile.dart';
 import 'chat_room_screen.dart';
 import 'qr_contact_screen.dart';
 import 'server_connect_screen.dart';
@@ -49,7 +50,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       final messages = await widget.database.getMessagesByContactId(contact.id);
       _latest[contact.id] = messages.isEmpty ? null : messages.last;
     }
-    if (mounted) setState(() { _contacts = contacts; _requests = requests; });
+    if (mounted) setState(() { _contacts = contacts; _requests = requests.where((request) => request.status == 'pending' || request.status == 'pendingReceived').toList(); });
   }
 
   @override
@@ -68,6 +69,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Future<void> _acceptRequest(ContactRequestModel request) async { await widget.chatService.acceptContactRequest(request); await _loadContacts(); }
   Future<void> _declineRequest(ContactRequestModel request) async { await widget.chatService.declineContactRequest(request); await _loadContacts(); }
 
+  Future<void> _openStorageSettings() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: DataStorageSettingTile(
+          onPathChanged: () async {
+            await widget.database.close();
+            await widget.database.initialize();
+          },
+        ),
+      ),
+    );
+    await _loadContacts();
+  }
+
   Future<void> _deleteContact(ContactModel contact) async {
     final shouldDelete = await showDialog<bool>(context: context, builder: (_) => AlertDialog(title: const Text('Xóa liên hệ?'), content: Text('Xóa ${contact.displayName} và toàn bộ đoạn chat trên thiết bị này?'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Xóa'))]));
     if (shouldDelete == true) { await widget.database.deleteContact(contact.id); await _loadContacts(); }
@@ -79,6 +95,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           title: const Text('Tin nhắn'),
           actions: [
             IconButton(tooltip: 'Thêm liên hệ', onPressed: _openQr, icon: const Icon(Icons.qr_code_2)),
+            IconButton(tooltip: 'Vị trí lưu dữ liệu', onPressed: _openStorageSettings, icon: const Icon(Icons.folder_outlined)),
             IconButton(tooltip: 'Cấu hình server', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ServerConnectScreen(client: widget.client, clientId: widget.profile['id'] as String))), icon: const Icon(Icons.tune)),
           ],
         ),
@@ -106,16 +123,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: Stack(children: [CircleAvatar(backgroundColor: Theme.of(context).colorScheme.primaryContainer, child: Text(contact.displayName.isEmpty ? '?' : contact.displayName[0].toUpperCase())), Positioned(right: 0, bottom: 0, child: Icon(Icons.circle, size: 12, color: contact.isOnline ? const Color(0xff58d69c) : Colors.white30))]),
         title: Text(contact.displayName, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text('ID: ${contact.id}\nKhóa công khai: ${contact.publicKey}\n${latest?.content ?? 'Bắt đầu cuộc trò chuyện bảo mật'}', maxLines: 3, overflow: TextOverflow.ellipsis),
+        subtitle: Text('ID: ${contact.id}\nKhóa công khai: ${contact.publicKey}\n${contact.status == ContactStatus.accepted ? (latest?.content ?? 'Bắt đầu cuộc trò chuyện bảo mật') : _statusLabel(contact.status)}', maxLines: 3, overflow: TextOverflow.ellipsis),
         isThreeLine: true,
         trailing: latest == null ? null : Text(_time(latest.timestamp), style: Theme.of(context).textTheme.labelSmall),
-        onTap: () async { await Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(contact: contact, database: widget.database, chatService: widget.chatService, client: widget.client, myClientId: widget.profile['id'] as String))); _loadContacts(); },
+        onTap: contact.status != ContactStatus.accepted
+          ? () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hãy chờ lời mời được chấp nhận trước khi nhắn tin')))
+          : () async { await Navigator.push(context, MaterialPageRoute(builder: (_) => ChatRoomScreen(contact: contact, database: widget.database, chatService: widget.chatService, client: widget.client, myClientId: widget.profile['id'] as String))); _loadContacts(); },
         onLongPress: () => _deleteContact(contact),
       ),
     );
   }
 
   String _time(DateTime date) => '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  String _statusLabel(ContactStatus status) => switch (status) { ContactStatus.pendingSent => 'Đang chờ chấp nhận', ContactStatus.pendingReceived => 'Có lời mời mới', ContactStatus.rejected => 'Lời mời bị từ chối', ContactStatus.accepted => 'Bắt đầu cuộc trò chuyện bảo mật' };
 }
 
 class _ConnectionBanner extends StatelessWidget {
