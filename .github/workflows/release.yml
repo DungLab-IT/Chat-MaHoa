@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup --no-progress --yes
-          iscc windows/installer.iss
+          iscc /O. windows/installer.iss
           if (-not (Test-Path lan-secure-messenger-windows-setup.exe)) { throw 'Windows installer was not created' }
 
       - name: Build macOS
