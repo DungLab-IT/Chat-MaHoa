@@ -1,7 +1,3 @@
-import 'dart:convert';
-
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../../models/contact_model.dart';
 import '../../models/contact_request_model.dart';
 import '../../models/message_model.dart';
@@ -12,19 +8,9 @@ class WebDatabaseBackend implements DatabaseBackend {
   final Map<String, ContactModel> _contacts = {};
   final Map<String, ContactRequestModel> _requests = {};
   final Map<String, MessageModel> _messages = {};
-  SharedPreferences? _preferences;
 
   @override
-  Future<void> initialize() async {
-    if (_preferences != null) return;
-    _preferences = await SharedPreferences.getInstance();
-    final preferences = _preferences!;
-    final profile = preferences.getString('web_profile');
-    if (profile != null) _profile.addAll(jsonDecode(profile) as Map<String, dynamic>);
-    _loadMap(preferences.getStringList('web_contacts'), (map) => _contacts[map['id'] as String] = ContactModel.fromMap(map));
-    _loadMap(preferences.getStringList('web_requests'), (map) => _requests[map['id'] as String] = ContactRequestModel.fromMap(map));
-    _loadMap(preferences.getStringList('web_messages'), (map) => _messages[map['id'] as String] = MessageModel.fromMap(map));
-  }
+  Future<void> initialize() async {}
 
   @override
   Future<void> close() async {}
@@ -34,7 +20,6 @@ class WebDatabaseBackend implements DatabaseBackend {
     _profile
       ..clear()
       ..addAll(profile);
-    await _preferences?.setString('web_profile', jsonEncode(_profile));
   }
 
   @override
@@ -45,7 +30,6 @@ class WebDatabaseBackend implements DatabaseBackend {
   @override
   Future<void> saveContact(ContactModel contact) async {
     _contacts[contact.id] = contact;
-    await _saveMap('web_contacts', _contacts.values.map((item) => item.toMap()).toList());
   }
 
   @override
@@ -56,7 +40,7 @@ class WebDatabaseBackend implements DatabaseBackend {
   }
 
   @override
-  Future<void> saveContactRequest(ContactRequestModel request) async { _requests[request.id] = request; await _saveMap('web_requests', _requests.values.map((item) => item.toMap()).toList()); }
+  Future<void> saveContactRequest(ContactRequestModel request) async { _requests[request.id] = request; }
 
   @override
   Future<List<ContactRequestModel>> getPendingContactRequests() async => _requests.values.where((request) => request.status == 'pending').toList();
@@ -69,11 +53,10 @@ class WebDatabaseBackend implements DatabaseBackend {
     final request = _requests[requestId];
     if (request == null) return;
     _requests[requestId] = ContactRequestModel(id: request.id, senderId: request.senderId, receiverId: request.receiverId, displayName: request.displayName, publicKey: request.publicKey, status: status, createdAt: request.createdAt);
-    await _saveMap('web_requests', _requests.values.map((item) => item.toMap()).toList());
   }
 
   @override
-  Future<void> deleteContact(String contactId) async { _contacts.remove(contactId); await _saveMap('web_contacts', _contacts.values.map((item) => item.toMap()).toList()); await deleteMessagesByContactId(contactId); }
+  Future<void> deleteContact(String contactId) async { _contacts.remove(contactId); await deleteMessagesByContactId(contactId); }
 
   @override
   Future<void> updateContactStatus(
@@ -90,13 +73,11 @@ class WebDatabaseBackend implements DatabaseBackend {
       isOnline: isOnline,
       lastSeen: lastSeen,
     );
-    await _saveMap('web_contacts', _contacts.values.map((item) => item.toMap()).toList());
   }
 
   @override
   Future<void> saveMessage(MessageModel message) async {
     _messages[message.id] = message;
-    await _saveMap('web_messages', _messages.values.map((item) => item.toMap()).toList());
   }
 
   @override
@@ -112,27 +93,16 @@ class WebDatabaseBackend implements DatabaseBackend {
   }
 
   @override
-  Future<void> deleteMessagesByContactId(String contactId) async { _messages.removeWhere((_, message) => message.senderId == contactId || message.receiverId == contactId); await _saveMap('web_messages', _messages.values.map((item) => item.toMap()).toList()); }
+  Future<void> deleteMessagesByContactId(String contactId) async { _messages.removeWhere((_, message) => message.senderId == contactId || message.receiverId == contactId); }
 
   @override
-  Future<void> deleteMessage(String messageId) async { _messages.remove(messageId); await _saveMap('web_messages', _messages.values.map((item) => item.toMap()).toList()); }
+  Future<void> deleteMessage(String messageId) async { _messages.remove(messageId); }
 
   @override
   Future<void> markMessageRecalled(String messageId) async {
     final message = _messages[messageId];
     if (message == null) return;
     _messages[messageId] = MessageModel(id: message.id, senderId: message.senderId, receiverId: message.receiverId, content: message.content, timestamp: message.timestamp, status: message.status, isRecalled: true);
-    await _saveMap('web_messages', _messages.values.map((item) => item.toMap()).toList());
-  }
-
-  void _loadMap(List<String>? values, void Function(Map<String, dynamic>) add) {
-    for (final value in values ?? const <String>[]) {
-      add(Map<String, dynamic>.from(jsonDecode(value) as Map));
-    }
-  }
-
-  Future<void> _saveMap(String key, List<Map<String, dynamic>> values) async {
-    await _preferences?.setStringList(key, values.map(jsonEncode).toList());
   }
 }
 
