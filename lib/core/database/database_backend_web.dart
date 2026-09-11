@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import '../../models/contact_model.dart';
 import '../../models/contact_request_model.dart';
 import '../../models/message_model.dart';
 import 'database_backend.dart';
+import '../../services/storage_service.dart';
 
 class WebDatabaseBackend implements DatabaseBackend {
   final Map<String, dynamic> _profile = {};
@@ -10,7 +13,31 @@ class WebDatabaseBackend implements DatabaseBackend {
   final Map<String, MessageModel> _messages = {};
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    final profile = StorageService.instance.readWebValue('lan_profile');
+    final contacts = StorageService.instance.readWebValue('lan_contacts');
+    final requests = StorageService.instance.readWebValue('lan_contact_requests');
+    final messages = StorageService.instance.readWebValue('lan_messages');
+    if (profile != null) _profile.addAll(Map<String, dynamic>.from(jsonDecode(profile) as Map));
+    if (contacts != null) {
+      for (final item in jsonDecode(contacts) as List) {
+        final contact = ContactModel.fromMap(Map<String, dynamic>.from(item as Map));
+        _contacts[contact.id] = contact;
+      }
+    }
+    if (requests != null) {
+      for (final item in jsonDecode(requests) as List) {
+        final request = ContactRequestModel.fromMap(Map<String, dynamic>.from(item as Map));
+        _requests[request.id] = request;
+      }
+    }
+    if (messages != null) {
+      for (final item in jsonDecode(messages) as List) {
+        final message = MessageModel.fromMap(Map<String, dynamic>.from(item as Map));
+        _messages[message.id] = message;
+      }
+    }
+  }
 
   @override
   Future<void> close() async {}
@@ -20,6 +47,7 @@ class WebDatabaseBackend implements DatabaseBackend {
     _profile
       ..clear()
       ..addAll(profile);
+    await _persist();
   }
 
   @override
@@ -30,6 +58,7 @@ class WebDatabaseBackend implements DatabaseBackend {
   @override
   Future<void> saveContact(ContactModel contact) async {
     _contacts[contact.id] = contact;
+    await _persist();
   }
 
   @override
@@ -40,10 +69,10 @@ class WebDatabaseBackend implements DatabaseBackend {
   }
 
   @override
-  Future<void> saveContactRequest(ContactRequestModel request) async { _requests[request.id] = request; }
+  Future<void> saveContactRequest(ContactRequestModel request) async { _requests[request.id] = request; await _persist(); }
 
   @override
-  Future<List<ContactRequestModel>> getPendingContactRequests() async => _requests.values.where((request) => request.status == 'pending').toList();
+  Future<List<ContactRequestModel>> getPendingContactRequests() async => _requests.values.where((request) => request.status == 'pending' || request.status == 'pendingReceived' || request.status == 'pendingSent').toList();
 
   @override
   Future<ContactRequestModel?> getContactRequest(String requestId) async => _requests[requestId];
@@ -53,10 +82,11 @@ class WebDatabaseBackend implements DatabaseBackend {
     final request = _requests[requestId];
     if (request == null) return;
     _requests[requestId] = ContactRequestModel(id: request.id, senderId: request.senderId, receiverId: request.receiverId, displayName: request.displayName, publicKey: request.publicKey, status: status, createdAt: request.createdAt);
+    await _persist();
   }
 
   @override
-  Future<void> deleteContact(String contactId) async { _contacts.remove(contactId); await deleteMessagesByContactId(contactId); }
+  Future<void> deleteContact(String contactId) async { _contacts.remove(contactId); await deleteMessagesByContactId(contactId); await _persist(); }
 
   @override
   Future<void> updateContactStatus(
@@ -78,6 +108,7 @@ class WebDatabaseBackend implements DatabaseBackend {
   @override
   Future<void> saveMessage(MessageModel message) async {
     _messages[message.id] = message;
+    await _persist();
   }
 
   @override
@@ -93,16 +124,27 @@ class WebDatabaseBackend implements DatabaseBackend {
   }
 
   @override
-  Future<void> deleteMessagesByContactId(String contactId) async { _messages.removeWhere((_, message) => message.senderId == contactId || message.receiverId == contactId); }
+  Future<void> deleteMessagesByContactId(String contactId) async { _messages.removeWhere((_, message) => message.senderId == contactId || message.receiverId == contactId); await _persist(); }
 
   @override
-  Future<void> deleteMessage(String messageId) async { _messages.remove(messageId); }
+  Future<void> deleteMessage(String messageId) async { _messages.remove(messageId); await _persist(); }
 
   @override
   Future<void> markMessageRecalled(String messageId) async {
     final message = _messages[messageId];
     if (message == null) return;
     _messages[messageId] = MessageModel(id: message.id, senderId: message.senderId, receiverId: message.receiverId, content: message.content, timestamp: message.timestamp, status: message.status, isRecalled: true);
+    await _persist();
+  }
+
+  @override
+  Future<void> clearChat(String contactId) async => deleteMessagesByContactId(contactId);
+
+  Future<void> _persist() async {
+    await StorageService.instance.saveWebValue('lan_profile', jsonEncode(_profile));
+    await StorageService.instance.saveWebValue('lan_contacts', jsonEncode(_contacts.values.map((contact) => contact.toMap()).toList()));
+    await StorageService.instance.saveWebValue('lan_contact_requests', jsonEncode(_requests.values.map((request) => request.toMap()).toList()));
+    await StorageService.instance.saveWebValue('lan_messages', jsonEncode(_messages.values.map((message) => message.toMap()).toList()));
   }
 }
 

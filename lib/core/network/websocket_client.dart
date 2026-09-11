@@ -8,7 +8,7 @@ import '../services/chat_contracts.dart';
 
 enum ConnectionStatus { connected, reconnecting, disconnected }
 
-class WebSocketClient implements ChatTransport, PeerEventTransport {
+class WebSocketClient implements ChatTransport, PeerEventTransport, ChatSyncTransport, FriendRequestTransport {
   WebSocketChannel? _channel;
   Timer? _reconnectTimer;
   String? _serverUrl;
@@ -142,6 +142,48 @@ class WebSocketClient implements ChatTransport, PeerEventTransport {
     final channel = _channel;
     if (clientId == null || channel == null) return;
     channel.sink.add(jsonEncode({'type': 'PEER_EVENT', 'to': toClientId, 'from': clientId, 'event': event, 'payload': payload}));
+  }
+
+  @override
+  void sendDeleteChatSync({required String targetUserId, required String chatId}) {
+    final clientId = _clientId;
+    final channel = _channel;
+    if (clientId == null || channel == null) return;
+    channel.sink.add(jsonEncode({
+      'type': 'DELETE_CHAT_SYNC',
+      'fromUserId': clientId,
+      'targetUserId': targetUserId,
+      'chatId': chatId,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    }));
+  }
+
+  @override
+  void sendFriendRequest({required String targetUserId, required String fromUserId, required String fromUserName, required String fromPublicKey}) {
+    final channel = _channel;
+    if (channel == null) return;
+    channel.sink.add(jsonEncode({
+      'type': 'FRIEND_REQUEST',
+      'targetUserId': targetUserId,
+      'fromUserId': fromUserId,
+      'fromUserName': fromUserName,
+      'fromPublicKey': fromPublicKey,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    }));
+  }
+
+  @override
+  void sendFriendResponse({required String targetUserId, required String fromUserId, required String fromUserName, required String fromPublicKey, required String action}) {
+    final channel = _channel;
+    if (channel == null) return;
+    channel.sink.add(jsonEncode({
+      'type': 'FRIEND_RESPOND',
+      'toUserId': targetUserId,
+      'fromUserId': fromUserId,
+      'fromUserName': fromUserName,
+      'fromPublicKey': fromPublicKey,
+      'action': action,
+    }));
   }
 
   Future<void> disconnect() async {

@@ -42,6 +42,8 @@ class UnsupportedDatabaseBackend implements DatabaseBackend {
   Future<void> deleteMessage(String messageId) async => _unsupported();
   @override
   Future<void> markMessageRecalled(String messageId) async => _unsupported();
+  @override
+  Future<void> clearChat(String contactId) async => _unsupported();
 }
 
 DatabaseBackend createDatabaseBackend() => UnsupportedDatabaseBackend();

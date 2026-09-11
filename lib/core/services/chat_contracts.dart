@@ -18,6 +18,7 @@ abstract class ChatDatabaseFeatures {
   Future<void> deleteMessagesByContactId(String contactId);
   Future<void> deleteMessage(String messageId);
   Future<void> markMessageRecalled(String messageId);
+  Future<void> clearChat(String contactId);
 }
 
 abstract class ChatTransport {
@@ -33,4 +34,25 @@ abstract class ChatTransport {
 
 abstract class PeerEventTransport {
   void sendPeerEvent({required String toClientId, required String event, required Map<String, dynamic> payload});
+}
+
+abstract class ChatSyncTransport {
+  void sendDeleteChatSync({required String targetUserId, required String chatId});
+}
+
+abstract class FriendRequestTransport {
+  void sendFriendRequest({
+    required String targetUserId,
+    required String fromUserId,
+    required String fromUserName,
+    required String fromPublicKey,
+  });
+
+  void sendFriendResponse({
+    required String targetUserId,
+    required String fromUserId,
+    required String fromUserName,
+    required String fromPublicKey,
+    required String action,
+  });
 }

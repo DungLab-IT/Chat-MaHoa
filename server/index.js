@@ -130,6 +130,61 @@ function forwardPeerEvent(socket, message) {
   sendJson(socket, { type: 'QUEUED', to });
 }
 
+function queueOrSend(targetUserId, message, senderSocket) {
+  const recipient = clients.get(targetUserId);
+  if (recipient && sendJson(recipient, message)) return;
+  const queue = offlineQueue.get(targetUserId) || [];
+  queue.push(message);
+  offlineQueue.set(targetUserId, queue);
+  sendJson(senderSocket, { type: 'QUEUED', to: targetUserId });
+}
+
+function forwardFriendRequest(socket, message) {
+  const { targetUserId, fromUserId, fromUserName, fromPublicKey, timestamp } = message;
+  if (socket.clientId !== fromUserId || typeof targetUserId !== 'string' || typeof fromUserName !== 'string' || typeof fromPublicKey !== 'string') {
+    sendError(socket, 'FRIEND_REQUEST has invalid sender or contact data');
+    return;
+  }
+  queueOrSend(targetUserId, {
+    type: 'FRIEND_REQUEST_RECEIVED',
+    fromUserId,
+    fromUserName,
+    fromPublicKey,
+    timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
+  }, socket);
+}
+
+function forwardFriendResponse(socket, message) {
+  const { toUserId, fromUserId, fromUserName, fromPublicKey, action } = message;
+  if (socket.clientId !== fromUserId || typeof toUserId !== 'string' || !['accepted', 'rejected'].includes(action)) {
+    sendError(socket, 'FRIEND_RESPOND has invalid sender or action');
+    return;
+  }
+  queueOrSend(toUserId, {
+    type: 'FRIEND_RESPONDED',
+    fromUserId,
+    fromUserName,
+    fromPublicKey,
+    action,
+    timestamp: Date.now(),
+  }, socket);
+}
+
+function forwardChatDeletion(socket, message) {
+  const { fromUserId, targetUserId, chatId, timestamp } = message;
+  if (socket.clientId !== fromUserId || typeof targetUserId !== 'string' || typeof chatId !== 'string') {
+    sendError(socket, 'DELETE_CHAT_SYNC has invalid sender or target data');
+    return;
+  }
+  queueOrSend(targetUserId, {
+    type: 'REMOTE_CHAT_DELETED',
+    fromUserId,
+    targetUserId,
+    chatId,
+    timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
+  }, socket);
+}
+
 server.on('connection', (socket) => {
   socket.clientId = null;
   console.log('[CONNECT] client connected');
@@ -172,6 +227,24 @@ server.on('connection', (socket) => {
         return;
       }
       forwardPeerEvent(socket, message);
+      return;
+    }
+
+    if (message.type === 'FRIEND_REQUEST') {
+      if (!socket.clientId) { sendError(socket, 'Register before sending friend requests'); return; }
+      forwardFriendRequest(socket, message);
+      return;
+    }
+
+    if (message.type === 'FRIEND_RESPOND') {
+      if (!socket.clientId) { sendError(socket, 'Register before responding to friend requests'); return; }
+      forwardFriendResponse(socket, message);
+      return;
+    }
+
+    if (message.type === 'DELETE_CHAT_SYNC') {
+      if (!socket.clientId) { sendError(socket, 'Register before synchronizing chat deletion'); return; }
+      forwardChatDeletion(socket, message);
       return;
     }
 

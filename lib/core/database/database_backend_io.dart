@@ -1,13 +1,13 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../models/contact_model.dart';
 import '../../models/contact_request_model.dart';
 import '../../models/message_model.dart';
 import 'database_backend.dart';
+import '../../services/storage_service.dart';
 
 class NativeDatabaseBackend implements DatabaseBackend {
   Database? _database;
@@ -21,14 +21,23 @@ class NativeDatabaseBackend implements DatabaseBackend {
     }
     Directory directory;
     try {
-      directory = await getApplicationDocumentsDirectory();
+      directory = Directory(await StorageService.instance.getNativeStoragePath());
+      await directory.create(recursive: true);
+      final databaseFile = File(path.join(directory.path, 'lan_secure_messenger.db'));
+      if (!await databaseFile.exists()) {
+        final defaultPath = await StorageService.instance.getDefaultNativeStoragePath();
+        final oldDatabase = File(path.join(defaultPath, 'lan_secure_messenger.db'));
+        if (await oldDatabase.exists() && oldDatabase.path != databaseFile.path) {
+          await oldDatabase.copy(databaseFile.path);
+        }
+      }
     } catch (_) {
       directory = Directory.systemTemp;
     }
     final databasePath = path.join(directory.path, 'lan_secure_messenger.db');
     _database = await openDatabase(
       databasePath,
-      version: 2,
+      version: 3,
       onCreate: (database, version) async {
         await _createTables(database);
       },
@@ -39,6 +48,9 @@ class NativeDatabaseBackend implements DatabaseBackend {
             id TEXT PRIMARY KEY, sender_id TEXT NOT NULL, receiver_id TEXT NOT NULL,
             display_name TEXT NOT NULL, public_key TEXT NOT NULL, status TEXT NOT NULL,
             created_at INTEGER NOT NULL)''');
+        }
+        if (oldVersion < 3) {
+          await database.execute("ALTER TABLE contacts ADD COLUMN status TEXT NOT NULL DEFAULT 'accepted'");
         }
       },
     );
@@ -59,7 +71,8 @@ class NativeDatabaseBackend implements DatabaseBackend {
         display_name TEXT NOT NULL,
         public_key TEXT NOT NULL,
         is_online INTEGER DEFAULT 0,
-        last_seen DATETIME
+        last_seen DATETIME,
+        status TEXT NOT NULL DEFAULT 'accepted'
       )
     ''');
     await database.execute('''
@@ -121,7 +134,7 @@ class NativeDatabaseBackend implements DatabaseBackend {
 
   @override
   Future<List<ContactRequestModel>> getPendingContactRequests() async {
-    final rows = await database.query('contact_requests', where: 'status = ?', whereArgs: ['pending'], orderBy: 'created_at DESC');
+    final rows = await database.query('contact_requests', where: "status IN (?, ?, ?)", whereArgs: ['pending', 'pendingReceived', 'pendingSent'], orderBy: 'created_at DESC');
     return rows.map(ContactRequestModel.fromMap).toList();
   }
 
@@ -184,6 +197,9 @@ class NativeDatabaseBackend implements DatabaseBackend {
 
   @override
   Future<void> markMessageRecalled(String messageId) async => database.update('messages', {'is_recalled': 1}, where: 'id = ?', whereArgs: [messageId]);
+
+  @override
+  Future<void> clearChat(String contactId) async => deleteMessagesByContactId(contactId);
 }
 
 DatabaseBackend createDatabaseBackend() => NativeDatabaseBackend();

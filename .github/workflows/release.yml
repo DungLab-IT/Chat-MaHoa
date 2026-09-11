@@ -40,12 +40,9 @@ jobs:
         if: matrix.target == 'windows'
         shell: pwsh
         run: |
-          $releaseDir = Get-ChildItem -Path build/windows -Directory -Recurse |
-            Where-Object { Test-Path (Join-Path $_.FullName 'lan_secure_messenger.exe') } |
-            Select-Object -First 1
-          if (-not $releaseDir) { throw 'Flutter Windows release directory was not found' }
-          Copy-Item (Join-Path $releaseDir.FullName 'lan_secure_messenger.exe') lan-secure-messenger-windows.exe
-          Compress-Archive -Path (Join-Path $releaseDir.FullName '*') -DestinationPath lan-secure-messenger-windows.zip
+          choco install innosetup --no-progress --yes
+          iscc /O. windows/installer.iss
+          if (-not (Test-Path lan-secure-messenger-windows-setup.exe)) { throw 'Windows installer was not created' }
 
       - name: Build macOS
         if: matrix.target == 'macos'
@@ -68,8 +65,7 @@ jobs:
         with:
           name: release-${{ matrix.target }}
           path: |
-            lan-secure-messenger-windows.zip
-            lan-secure-messenger-windows.exe
+            lan-secure-messenger-windows-setup.exe
             lan-secure-messenger-macos.dmg
             lan-secure-messenger-android.apk
             lan-secure-messenger-web.zip
