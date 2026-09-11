@@ -25,4 +25,5 @@ abstract class DatabaseBackend {
   Future<void> deleteMessagesByContactId(String contactId);
   Future<void> deleteMessage(String messageId);
   Future<void> markMessageRecalled(String messageId);
+  Future<void> clearChat(String contactId);
 }

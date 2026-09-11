@@ -5,6 +5,7 @@ class ContactModel {
     required this.publicKey,
     this.isOnline = false,
     this.lastSeen,
+    this.status = ContactStatus.accepted,
   });
 
   final String id;
@@ -12,6 +13,7 @@ class ContactModel {
   final String publicKey;
   final bool isOnline;
   final DateTime? lastSeen;
+  final ContactStatus status;
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -19,6 +21,7 @@ class ContactModel {
         'public_key': publicKey,
         'is_online': isOnline ? 1 : 0,
         'last_seen': lastSeen?.toIso8601String(),
+        'status': status.name,
       };
 
   factory ContactModel.fromMap(Map<String, dynamic> map) {
@@ -28,6 +31,10 @@ class ContactModel {
       publicKey: map['public_key'] as String,
       isOnline: map['is_online'] == 1 || map['is_online'] == true,
       lastSeen: _parseDateTime(map['last_seen']),
+      status: ContactStatus.values.firstWhere(
+        (value) => value.name == map['status'],
+        orElse: () => ContactStatus.accepted,
+      ),
     );
   }
 
@@ -37,3 +44,5 @@ class ContactModel {
     return DateTime.tryParse(value.toString());
   }
 }
+
+enum ContactStatus { pendingSent, pendingReceived, accepted, rejected }

@@ -87,4 +87,6 @@ class DatabaseHelper implements ChatDatabase, ChatDatabaseFeatures {
   Future<void> deleteMessage(String messageId) async { await initialize(); await _backend.deleteMessage(messageId); }
   @override
   Future<void> markMessageRecalled(String messageId) async { await initialize(); await _backend.markMessageRecalled(messageId); }
+  @override
+  Future<void> clearChat(String contactId) async { await initialize(); await _backend.clearChat(contactId); }
 }

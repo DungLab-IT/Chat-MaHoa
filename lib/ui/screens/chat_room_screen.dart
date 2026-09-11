@@ -9,6 +9,7 @@ import '../../core/services/chat_service.dart';
 import '../../core/network/websocket_client.dart';
 import '../../models/contact_model.dart';
 import '../../models/message_model.dart';
+import '../dialogs/delete_chat_dialog.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   const ChatRoomScreen({super.key, required this.contact, required this.database, required this.chatService, required this.client, required this.myClientId});
@@ -31,6 +32,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _sending = false;
   ConnectionStatus _status = ConnectionStatus.disconnected;
   StreamSubscription<ConnectionStatus>? _statusSubscription;
+  StreamSubscription<String>? _chatDeletedSubscription;
 
   @override
   void initState() {
@@ -47,13 +49,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _statusSubscription = widget.client.connectionStatus.listen((status) {
       if (mounted) setState(() => _status = status);
     });
+    _chatDeletedSubscription = widget.chatService.chatDeletedStream.listen((contactId) {
+      if (mounted && contactId == widget.contact.id) setState(() => _messages = []);
+    });
   }
 
   Future<void> _loadMessages() async { final messages = await widget.database.getMessagesByContactId(widget.contact.id); if (mounted) { setState(() => _messages = messages); _scrollToBottom(); } }
 
   Future<void> _deleteChat() async {
-    await widget.database.deleteMessagesByContactId(widget.contact.id);
-    if (mounted) { setState(() => _messages = []); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã xóa cuộc trò chuyện trên thiết bị này'))); }
+    final deleteForBoth = await showDialog<bool>(context: context, builder: (_) => DeleteChatDialog(contactName: widget.contact.displayName));
+    if (deleteForBoth == null) return;
+    await widget.chatService.deleteChat(contactId: widget.contact.id, forBoth: deleteForBoth);
+    if (mounted) { setState(() => _messages = []); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(deleteForBoth ? 'Đã xóa cuộc trò chuyện cho cả hai bên' : 'Đã xóa cuộc trò chuyện trên thiết bị này'))); }
   }
 
   Future<void> _deleteMessage(MessageModel message) async { await widget.database.deleteMessage(message.id); await _loadMessages(); }
@@ -79,7 +86,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   @override
-  void dispose() { _subscription?.cancel(); _statusSubscription?.cancel(); _inputController.dispose(); _scrollController.dispose(); super.dispose(); }
+  void dispose() { _subscription?.cancel(); _statusSubscription?.cancel(); _chatDeletedSubscription?.cancel(); _inputController.dispose(); _scrollController.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => Scaffold(
