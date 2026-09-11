@@ -1,157 +1,151 @@
-# Cấu trúc hệ thống Lan Secure Messenger
+# Lan Secure Messenger v2.0.0
 
-## 1. Tổng quan
+## 1. Tong quan kien truc
 
-Lan Secure Messenger gồm hai phần:
+Lan Secure Messenger la ung dung Flutter da nen ket hop mo hinh client-server voi kha nang discovery P2P trong LAN:
 
-1. **Flutter Client**: chạy trên macOS, Windows, Android, iOS và Web. Client tạo khóa, mã hóa/giải mã tin nhắn, lưu dữ liệu cục bộ và hiển thị giao diện.
-2. **Local Relay Server**: Node.js dùng thư viện `ws`. Server chỉ giữ kết nối WebSocket, chuyển tiếp payload và queue tạm tin nhắn khi người nhận offline.
-
-Relay không có Private Key hoặc Session Key nên không thể đọc plaintext.
+- **Flutter Client** chay tren Android, macOS, Windows va Web. Client quan ly profile, khoa, database cuc bo, ma hoa/giai ma va giao dien.
+- **P2P LAN discovery** dung UDP broadcast tren cong `48486` de phat hien thiet bi trong cung mang. Beacon chi chua user ID, ten hien thi, public key va relay port. Web khong duoc phep mo UDP raw socket nen dung fallback thong bao va QR/Public Key.
+- **Node.js Relay Server** dung Express, `ws` va `compression`, lang nghe cong `48485`. Relay phuc vu portal/download artifact qua HTTP, chuyen tiep WebSocket payload va queue tam tin nhan offline trong RAM.
+- Lenh ket ban LAN sau khi phat hien peer hien tai di qua `FRIEND_REQUEST` tren WebSocket relay; UDP khong chuyen plaintext tin nhan.
 
 ```mermaid
 flowchart LR
-    A[Flutter Client A] -->|WebSocket E2EE payload| R[Node.js Relay :48485]
-    B[Flutter Client B] -->|WebSocket E2EE payload| R
-    R -->|Forward / Offline Queue RAM| B
-    A -. X25519 + HKDF .- B
+    A[Flutter Android/macOS/Windows/Web] -->|WSS/WS FRIEND_REQUEST va E2EE payload| R[Node.js Express + WebSocket Relay :48485]
+    B[Flutter Client B] --> R
+    A -. UDP broadcast discovery :48486 .- B
+    R -->|Forward / offline queue RAM| B
+    R -->|Portal va download artifact| P[HTTP Portal]
 ```
 
-## 2. Cây thư mục chính
+Relay khong co private key, session key hoac plaintext tin nhan.
+
+## 2. Bao mat va ma hoa E2EE
+
+### Khoa va phien
+
+- `CryptoService` tao key pair **X25519**.
+- Hai client dung X25519 de tao shared secret, sau do dung HKDF-SHA256 voi context `lan-secure-messenger-session-key` de dan xuat session key.
+- Tin nhan duoc ma hoa bang **AES-256-GCM** voi nonce rieng va authentication tag. Relay chi thay cac truong ma hoa `iv`, `ciphertext`, `tag`.
+- Public key hien duoc serialize Base64. Relay co the dung public key da dang ky de phan giai loi moi ket ban theo public key.
+- Kien truc co the mo rong them **Ed25519** de ky/xac thuc beacon va friend request. Phien ban code hien tai chua thuc hien Ed25519 signature; X25519 public key khong duoc goi la chu ky Ed25519.
+
+### Bao quan khoa va du lieu
+
+- Private key khong duoc luu plaintext. Private key duoc bao boc bang PBKDF2-HMAC-SHA256 tu Master PIN va AES-256-GCM truoc khi luu trong profile cuc bo.
+- Native (Android, macOS, Windows) dung SQLite qua `DatabaseHelper` va `StorageService`. Nguoi dung co the chon thu muc luu data tren desktop/Android neu platform cho phep.
+- Web dung Cookie va `localStorage` thong qua `StorageService`; database web hien tai dung backend in-memory dong bo cung cac gia tri web storage.
+- Khong commit Master PIN, private key, session key hoac du lieu nguoi dung.
+
+## 3. Ba co che ket ban
+
+### 3.1 LAN Auto-Discovery
+
+`LanDiscovery` trong `lib/core/network/lan_discovery_io.dart` bind UDP IPv4 tren cong `48486`, bat broadcast va phat beacon moi 2 giay toi `255.255.255.255`.
+
+Beacon co dang:
+
+```json
+{
+  "magic": "LAN_SECURE_DISCOVERY",
+  "userId": "MY_USER_ID",
+  "displayName": "MY_NAME",
+  "publicKey": "MY_PUBLIC_KEY",
+  "port": 48485
+}
+```
+
+Beacon cua chinh minh bi bo qua. Peer hop le duoc hien thi trong tab LAN; nut **Ket ban** goi `ChatService.sendContactInvite` va gui `FRIEND_REQUEST` qua relay. Web dung `lan_discovery_stub.dart` va hien thi huong dan dung QR/Public Key.
+
+### 3.2 QR Code
+
+- `qr_flutter` hien thi ma QR ca nhan.
+- Payload QR JSON gom `app`, `id`, `name`, `key`; client cung chap nhan payload legacy co truong `pk`.
+- `mobile_scanner` quet QR tren thiet bi co camera.
+- Desktop/Web co the dan chuoi JSON/Base64 vao o fallback khi camera khong kha dung.
+- Sau khi parse, client hien thi dialog thong tin peer truoc khi gui loi moi.
+
+### 3.3 Public Key / User ID thu cong
+
+Tab **ID / Public Key** nhan User ID hoac public key Base64/Hex. User ID duoc gui truc tiep toi relay. Public key duoc relay map ve user ID da dang ky qua truong `targetPublicKey`, sau do chuyen tiep `FRIEND_REQUEST`.
+
+## 4. Xoa tro chuyen hai chieu
+
+Trong `ChatRoomScreen`, nguoi dung co hai lua chon:
+
+- **Xoa mot chieu**: `ChatService.deleteChat(forBoth: false)` chi xoa messages tren database cuc bo.
+- **Xoa hai chieu**: `ChatService.deleteChat(forBoth: true)` xoa local va gui `DELETE_CHAT_SYNC` toi peer. Peer nhan `REMOTE_CHAT_DELETED` va xoa chat local.
+
+`forBoth` la co che noi bo tuong ung voi y nghia `delete_for_both: true`; wire protocol hien tai dung cac truong `fromUserId`, `targetUserId`, `chatId`, `timestamp` trong message `DELETE_CHAT_SYNC`.
+
+## 5. Cay thu muc chi tiet
 
 ```text
 lan_secure_messenger/
-├── android/                    # Cấu hình Android và quyền mạng/camera
-├── ios/                        # Cấu hình iOS và quyền camera/LAN
-├── macos/                      # Sandbox entitlements macOS
-├── windows/                    # Runner Windows
-├── web/                        # Flutter Web bootstrap
+├── .github/
+│   └── workflows/
+│       └── release.yml                 # Build Android/Web, macOS, Windows va publish tag v*
+├── android/                            # Android Gradle, manifest, quyen Internet/camera
+├── ios/                                # iOS runner va camera/LAN configuration
+├── macos/                              # macOS runner, entitlements va Xcode project
+├── windows/                            # Windows runner va Inno Setup installer.iss
+├── web/                                # Flutter Web bootstrap, manifest va icons
 ├── lib/
-│   ├── main.dart               # Bootstrap profile, unlock và app shell
+│   ├── main.dart                       # Bootstrap profile, unlock va app shell
 │   ├── models/
-│   │   ├── contact_model.dart  # ContactModel và map serialization
-│   │   └── message_model.dart  # MessageModel và map serialization
+│   │   ├── contact_model.dart          # ContactModel va contact status
+│   │   ├── contact_request_model.dart  # Friend request serialization
+│   │   └── message_model.dart          # Message serialization
 │   ├── core/
 │   │   ├── crypto/
-│   │   │   └── crypto_service.dart
+│   │   │   └── crypto_service.dart     # X25519, HKDF, PBKDF2, AES-256-GCM
 │   │   ├── database/
-│   │   │   ├── database_helper.dart
-│   │   │   ├── database_backend.dart
+│   │   │   ├── database_helper.dart    # Database facade
+│   │   │   ├── database_backend.dart  # Backend conditional export
 │   │   │   ├── database_backend_io.dart
 │   │   │   ├── database_backend_web.dart
 │   │   │   └── database_backend_stub.dart
 │   │   ├── network/
-│   │   │   └── websocket_client.dart
+│   │   │   ├── websocket_client.dart   # Relay connection, reconnect, friend/chat sync
+│   │   │   ├── lan_discovery.dart      # Conditional LAN discovery export
+│   │   │   ├── lan_discovery_io.dart   # Native UDP broadcast/listener
+│   │   │   └── lan_discovery_stub.dart # Web-safe no-op implementation
 │   │   └── services/
-│   │       ├── chat_contracts.dart
-│   │       └── chat_service.dart
+│   │       ├── chat_contracts.dart     # Transport/database interfaces
+│   │       └── chat_service.dart       # Chat, contact request va delete orchestration
+│   ├── services/
+│   │   └── storage_service.dart        # Native folder picker, Cookie/localStorage Web
 │   └── ui/
-│       └── screens/
-│           ├── setup_profile_screen.dart
-│           ├── server_connect_screen.dart
-│           ├── qr_contact_screen.dart
-│           ├── chat_list_screen.dart
-│           └── chat_room_screen.dart
+│       ├── dialogs/
+│       │   └── delete_chat_dialog.dart # Xoa mot chieu/hai chieu prompt
+│       ├── screens/
+│       │   ├── setup_profile_screen.dart
+│       │   ├── server_connect_screen.dart
+│       │   ├── qr_contact_screen.dart  # QR, LAN va ID/Public Key tabs
+│       │   ├── chat_list_screen.dart
+│       │   └── chat_room_screen.dart
+│       └── widgets/
+│           └── data_storage_setting_tile.dart
 ├── server/
-│   ├── index.js               # WebSocket relay engine
-│   ├── package.json           # Dependency ws và npm start
-│   └── package-lock.json
-├── test/                      # Crypto, database, pipeline và widget tests
-├── PROJECT_SPEC.md
-├── README.md
-└── pubspec.yaml
+│   ├── index.js                        # Express portal + WebSocket relay :48485
+│   ├── package.json                     # ws, express, compression
+│   └── public/                          # Portal Web va downloads artifact
+├── scripts/
+│   └── prepare_portal.sh                # Dong goi/copy Web artifact vao portal
+├── test/                               # Crypto, database, pipeline va widget tests
+├── pubspec.yaml                         # Flutter dependencies va version 2.0.0+1
+├── PROJECT_SPEC.md                      # Product/technical specification
+├── README.md                            # Huong dan setup, test va deploy
+└── SYSTEM_STRUCTURE.md                  # Tai lieu kien truc nay
 ```
 
-## 3. Luồng khởi động client
+## 6. Release artifact
 
-1. `main.dart` khởi tạo `DatabaseHelper`.
-2. Nếu chưa có dòng `my_profile`, app mở `SetupProfileScreen`.
-3. Người dùng nhập tên và Master PIN 6 chữ số.
-4. `CryptoService` tạo X25519 key pair.
-5. Private Key được mã hóa bằng PBKDF2-HMAC-SHA256 + AES-256-GCM.
-6. Profile được lưu cục bộ; payload Private Key mã hóa chứa ciphertext, IV và tag.
-7. Nếu profile đã tồn tại, app yêu cầu Master PIN để giải mã Private Key vào RAM.
-8. Sau khi unlock, `WebSocketClient` tự kết nối tới URL relay đã lưu, mặc định `ws://localhost:48485`.
-9. `ChatService` dùng chung profile, Private Key, Database và WebSocket transport.
+Workflow `.github/workflows/release.yml` chi chay khi push tag `v*` va tao bốn artifact:
 
-## 4. Luồng gửi tin nhắn
+- `lan-secure-messenger-android.apk`
+- `lan-secure-messenger-macos.dmg`
+- `lan-secure-messenger-windows-setup.exe`
+- `lan-secure-messenger-web.zip`
 
-```text
-ChatRoomScreen
-    -> ChatService.sendMessage()
-    -> DatabaseHelper tìm ContactModel
-    -> CryptoService derive X25519 + HKDF Session Key
-    -> AES-256-GCM encrypt plaintext
-    -> WebSocketClient gửi MESSAGE_FORWARD
-    -> DatabaseHelper lưu plaintext cục bộ với status = sent
-    -> messageStream cập nhật UI
-```
-
-Payload gửi qua relay:
-
-```json
-{
-  "type": "MESSAGE_FORWARD",
-  "to": "usr_receiver",
-  "from": "usr_sender",
-  "payload": {
-    "iv": "base64",
-    "ciphertext": "base64",
-    "tag": "base64"
-  }
-}
-```
-
-## 5. Luồng nhận tin nhắn
-
-```text
-WebSocketClient.messages
-    -> ChatService.onMessageReceived()
-    -> Tìm Public Key người gửi trong contacts
-    -> Dẫn xuất Session Key
-    -> AES-256-GCM decrypt
-    -> Lưu plaintext vào messages với status = delivered
-    -> Phát MessageModel qua messageStream
-    -> ChatRoomScreen cập nhật bong bóng
-```
-
-Relay chỉ đọc `type`, `to`, `from` và chuyển nguyên `payload`. Relay không giải mã `ciphertext`.
-
-## 6. Database
-
-### Native
-
-Android, iOS, macOS và Windows dùng SQLite qua `sqflite_common_ffi`. `DatabaseHelper` gọi `path_provider` để chọn thư mục lưu database. Test VM có fallback vào thư mục tạm nếu plugin native chưa được đăng ký.
-
-### Web
-
-Web dùng backend fallback in-memory để không import `dart:io` và không làm trình duyệt crash. Khi cần persistence Web production, thay backend này bằng IndexedDB hoặc SharedPreferences Web.
-
-### Bảng
-
-- `contacts`: ID, tên hiển thị, Public Key, trạng thái online, last seen.
-- `messages`: sender, receiver, plaintext đã giải mã, timestamp và status.
-- `my_profile`: profile hiện tại, Public Key, Private Key đã mã hóa và salt.
-
-## 7. Relay Server
-
-`server/index.js` lắng nghe `0.0.0.0:48485` để client localhost và thiết bị trong LAN/VPS cùng kết nối.
-
-Server quản lý:
-
-- `Map<clientId, WebSocket>` cho client online.
-- `Map<clientId, Array>` cho offline queue trong RAM.
-- `REGISTER` để đăng ký client ID.
-- `MESSAGE_FORWARD` để forward payload.
-- Origin allowlist mặc định cho `localhost` và `127.0.0.1`.
-- Log connect, disconnect, sender, receiver, kích thước payload và tên field mã hóa.
-
-Server không lưu database tin nhắn và không lưu khóa.
-
-## 8. Quy tắc bảo mật
-
-- Không commit Master PIN, Private Key, file `.env` hoặc dữ liệu người dùng.
-- Không log plaintext, ciphertext, IV hoặc authentication tag.
-- Chỉ expose cổng WebSocket cần thiết trên VPS.
-- Dùng HTTPS/WSS qua reverse proxy khi triển khai production.
-- Với relay Internet, nên bổ sung authentication/rate limit trước khi dùng thực tế.
+Job `publish` download artifact tu Android/Web, macOS va Windows, sau do dang len GitHub Release bang `softprops/action-gh-release@v2`.
